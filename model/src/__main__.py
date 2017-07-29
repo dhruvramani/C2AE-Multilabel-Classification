@@ -23,16 +23,19 @@ class Model(object):
         self.y_pred = self.net.prediction(self.x, self.keep_prob)
         self.loss = self.net.loss(self.x, self.y, self.keep_prob)
         self.accuracy = self.net.accuracy(tf.nn.sigmoid(self.y_pred), self.y)
+        self.patk = self.net.patk(self.y, self.y_pred)
         self.summarizer.scalar("accuracy", self.accuracy)
         self.summarizer.scalar("loss", self.loss)
         self.train = self.net.train_step(self.loss)
         self.saver = tf.train.Saver()
         self.init = tf.global_variables_initializer()
+        self.local_init = tf.local_variables_initializer()
 
     def add_placeholders(self):
         self.x = tf.placeholder(tf.float32, shape=[None, self.config.features_dim])
         self.y = tf.placeholder(tf.float32, shape=[None, self.config.labels_dim])
         self.keep_prob = tf.placeholder(tf.float32)
+        #self.k = int()
 
     def run_epoch(self, sess, data, summarizer, epoch):
         err = list()
@@ -73,10 +76,11 @@ class Model(object):
                 else :
                     loss_, Y_pred, accuracy_val = sess.run([self.loss, tf.nn.sigmoid(self.y_pred), self.accuracy], feed_dict=feed_dict)
                     metrics = evaluate(predictions=Y_pred, labels=Y)
-                    p_k = patk(predictions=Y_pred, labels=Y)
                     accuracy += accuracy_val #metrics['accuracy']
             loss += loss_
             i += 1
+        X, Y = self.data.get_test()
+        p_k = patk(sess.run(tf.nn.sigmoid(self.y_pred), feed_dict={self.x: X, self.y: Y, self.keep_prob: 1}), Y) # sess.run(self.patk, feed_dict={self.x: X, self.y: Y, self.keep_prob: 1}) #
         return loss / i , accuracy / self.config.batch_size, metrics, p_k
     
     def add_summaries(self, sess):
@@ -98,6 +102,8 @@ class Model(object):
          + If patience becomes less than a certain threshold, devide learning rate by 10 and switch back to old model
          + If learning rate is lesser than a certain 
         '''
+        sess.run(self.init)
+        sess.run(self.local_init)
         max_epochs = self.config.max_epochs
         patience = self.config.patience
         patience_increase = self.config.patience_increase
@@ -114,11 +120,11 @@ class Model(object):
             if not self.config.debug :
                 if self.epoch_count % self.config.epoch_freq == 0 :
                     val_loss, _, _, _ = self.run_eval(sess, "validation", summarizer['val'], tr_step)
-                    test_loss, _, metrics, _= self.run_eval(sess, "test", summarizer['test'], tr_step)
+                    test_loss, _, metrics, patk= self.run_eval(sess, "test", summarizer['test'], tr_step)
                     output =  "=> Training : Loss = {:.2f} | Validation : Loss = {:.2f} | Test : Loss = {:.2f}".format(average_loss, val_loss, test_loss)
                     with open("../stdout/validation.log", "a+") as f:
                         output_ = output + "\n=> Test : Coverage = {}, Average Precision = {}, Micro Precision = {}, Micro Recall = {}, Micro F Score = {}".format(metrics['coverage'], metrics['average_precision'], metrics['micro_precision'], metrics['micro_recall'], metrics['micro_f1'])
-                        output_ += "\n=> Test : Macro Precision = {}, Macro Recall = {}, Macro F Score = {}\n\n\n".format(metrics['macro_precision'], metrics['macro_recall'], metrics['macro_f1'])
+                        output_ += "\n=> Test : Macro Precision = {}, Macro Recall = {}, Macro F Score = {}\n=> P@K = {}\n\n".format(metrics['macro_precision'], metrics['macro_recall'], metrics['macro_f1'], patk)
                         f.write(output_)
                     print(output)
                     if self.config.have_patience:
@@ -157,20 +163,13 @@ def init_model(config):
         model = Model(config)
     tf_config = tf.ConfigProto(allow_soft_placement=True)#, device_count = {'GPU': 0})
     tf_config.gpu_options.allow_growth = True
-    sm = tf.train.SessionManager()
+    sess = tf.Session(config=tf_config)
 
-    if config.retrain or config.load == True:
+    if config.load == True:
         print("=> Loading model from checkpoint")
-        load_ckpt_dir = config.ckptdir_path
+        model.saver.restore(sess, config.ckptdir_path)
     else:
         print("=> No model loaded from checkpoint")
-        load_ckpt_dir = ''
-    sess = sm.prepare_session("", init_op=model.init, saver=model.saver, checkpoint_dir=load_ckpt_dir, config=tf_config)
-    if config.load == True :
-        saver = tf.train.Saver()
-        sess_ = tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=True))
-        saver.restore(sess_, config.ckptdir_path + "/resultsmodel_best.ckpt")
-        return model, sess
     return model, sess
 
 def train_model(config):
