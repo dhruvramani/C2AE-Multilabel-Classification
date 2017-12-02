@@ -23,7 +23,6 @@ class Model(object):
         self.y_pred = self.net.prediction(self.x, self.keep_prob)
         self.loss = self.net.loss(self.x, self.y, self.keep_prob)
         self.accuracy = self.net.accuracy(tf.nn.sigmoid(self.y_pred), self.y)
-        self.patk = self.net.patk(self.y, self.y_pred)
         self.summarizer.scalar("accuracy", self.accuracy)
         self.summarizer.scalar("loss", self.loss)
         self.train = self.net.train_step(self.loss)
